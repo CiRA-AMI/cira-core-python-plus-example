@@ -33,12 +33,12 @@ def index():
 
 @app.route("/api", methods=['POST'])
 def api():
-    if 'service_name' not in request.form or 'jsonstr' not in request.form or 'image' not in request.files:
-        return jsonify({'error': 'Missing data'}), 400
+    if 'service_name' not in request.form:
+        return jsonify({'error': 'Missing service_name in data'}), 400
 
     service_name = request.form['service_name']
-    jsonstr = request.form['jsonstr']
-    image = request.files['image']
+    jsonstr = request.form.get('jsonstr', '{}')
+    image = request.files.get('image', None)
 
     try:
         data_in = json.loads(jsonstr)
