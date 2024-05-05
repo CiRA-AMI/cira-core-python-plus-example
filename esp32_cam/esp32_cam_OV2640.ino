@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include "esp_camera.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // Replace with your network credentials
 const char* ssid = "YOUR_SSID";
@@ -14,6 +14,8 @@ IPAddress gateway(192, 168, 2, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 WebServer server(80);
+
+SemaphoreHandle_t frameSemaphore;
 
 // ESP32-CAM pin configuration for OV2640 camera
 #define PWDN_GPIO_NUM     32
@@ -71,42 +73,50 @@ void setupCamera() {
 
 void handleMjpeg() {
   WiFiClient client = server.client();
-  String response = "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
-  client.print(response);
 
-  while (client.connected()) {
+  if (xSemaphoreTake(frameSemaphore, portMAX_DELAY) == pdTRUE) {
+    // Discard any existing frame in the buffer
+    esp_camera_fb_return(esp_camera_fb_get());
+
+    // Capture a new frame
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Camera capture failed");
-      break;
+      server.send(500, "text/plain", "Camera capture failed");
+      xSemaphoreGive(frameSemaphore);
+      return;
     }
 
-    client.print("--frame\r\n");
-    client.print("Content-Type: image/jpeg\r\n\r\n");
-    client.write(fb->buf, fb->len);
-    client.print("\r\n");
+    String response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: image/jpeg\r\n";
+    response += "Content-Length: " + String(fb->len) + "\r\n\r\n";
+    server.sendContent(response);
+    server.sendContent((char*)fb->buf, fb->len);
 
     esp_camera_fb_return(fb);
+    xSemaphoreGive(frameSemaphore);
   }
 }
 
 void handleLed() {
   String state = server.arg("state");
-  if (state == "on") {
-    digitalWrite(ledPin, HIGH);
-  } else if (state == "off") {
-    digitalWrite(ledPin, LOW);
+  
+  if (xSemaphoreTake(frameSemaphore, portMAX_DELAY) == pdTRUE) {
+    if (state == "on") {
+      digitalWrite(ledPin, HIGH);
+    } else if (state == "off") {
+      digitalWrite(ledPin, LOW);
+    }
+    server.send(200, "text/plain", "OK");
+    xSemaphoreGive(frameSemaphore);
   }
-  server.send(200, "text/plain", "OK");
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(ledPin, OUTPUT);
 
-  // Disable the brownout detector
-  //WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  frameSemaphore = xSemaphoreCreateMutex();
 
   // Configure the static IP address
   if (!WiFi.config(staticIP, gateway, subnet)) {
