@@ -4,6 +4,7 @@ import json
 import sys
 import platform
 from pathlib import Path
+import base64
 
 home_path = str(Path.home())
 if platform.system() == 'Windows' :
@@ -75,7 +76,7 @@ def api():
     if len(res.flow_out.img.data) > 10:
         img_data = res.flow_out.img.data
         response = Response(img_data, mimetype="image/jpeg") # "image/png"
-        response.headers['jsonstr'] = res.flow_out.jsonstr
+        response.headers['jsonstr'] = base64.b64encode(res.flow_out.jsonstr.encode('utf-8')).decode('utf-8')
         return response
     else:
         jsonstr_out = json.loads(res.flow_out.jsonstr)
